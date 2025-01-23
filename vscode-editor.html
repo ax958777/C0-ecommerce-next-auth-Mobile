@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VSCode Editor</title>
+    <style>
+        /* Previous styles remain the same */
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+        .editor-container {
+            background: #1e1e1e;
+            border: 1px solid #2d2d2d;
+            border-radius: 6px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+        }
+        .title-bar {
+            background: #252526;
+            padding: 8px 16px;
+            border-bottom: 1px solid #2d2d2d;
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .title-bar .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .dot.red { background: #ff5f56; }
+        .dot.yellow { background: #ffbd2e; }
+        .dot.green { background: #27c93f; }
+        #editor {
+            padding: 20px;
+            line-height: 1.6;
+            white-space: pre;
+            font-size: 14px;
+            overflow-y: auto;
+            flex-grow: 1;
+            position: relative;
+        }
+        #file-input {
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            background: #2d2d2d;
+            color: #fff;
+            border: 1px solid #3d3d3d;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1.2em;
+            background: #007acc;
+            margin-left: 1px;
+            animation: blink 1s infinite;
+            vertical-align: middle;
+        }
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        /* Syntax Highlighting */
+        .keyword { color: #569cd6; }
+        .control-flow { color: #c586c0; }
+        .type { color: #4ec9b0; }
+        .class { color: #4ec9b0; }
+        .function { color: #dcdcaa; }
+        .method { color: #dcdcaa; }
+        .property { color: #9cdcfe; }
+        .variable { color: #9cdcfe; }
+        .string { color: #ce9178; }
+        .number { color: #b5cea8; }
+        .comment { color: #6a9955; }
+        .operator { color: #d4d4d4; }
+        .punctuation { color: #d4d4d4; }
+        .module { color: #569cd6; }
+    </style>
+</head>
+<body>
+    <input type="file"  id="file-input" accept=".txt,.js,.py,.html,.css,.json,.ts,.jsx,.tsx">
+    <div class="editor-container">
+        <div class="title-bar">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+        </div>
+        <div id="editor"></div>
+    </div>
+
+    <script>
+        const editor = document.getElementById('editor');
+        const fileInput = document.getElementById('file-input');
+        const typingSpeed = 100; // 0.1 second delay
+
+        function createCursor() {
+            const cursor = document.createElement('span');
+            cursor.className = 'cursor';
+            return cursor;
+        }
+
+        function autoScroll() {
+            requestAnimationFrame(() => {
+                const cursor = editor.querySelector('.cursor');
+                if (cursor) {
+                    const cursorBottom = cursor.offsetTop + cursor.offsetHeight;
+                    const editorVisible = editor.clientHeight;
+                    const currentScroll = editor.scrollTop;
+                    
+                    if (cursorBottom > currentScroll + editorVisible - 50) {
+                        editor.scrollTo({
+                            top: cursorBottom - editorVisible + 50,
+                            behavior: 'smooth'
+                        });
+                    }
+                }
+            });
+        }
+
+        function getTokenType(text, pos) {
+            const patterns = [
+                { pattern: /^(use client|const|let|var|function|class|interface|enum|import|export|from|as|default|async|await)\b/, class: 'keyword' },
+                { pattern: /^(if|else|for|while|do|switch|case|break|continue|return|try|catch)\b/, class: 'control-flow' },
+                { pattern: /^[A-Z][a-zA-Z]*(?=\s|[.,;{}()\[\]]|$)/, class: 'class' },
+                { pattern: /^[a-z]+(?=\()/, class: 'function' },
+                { pattern: /^(["'`])(?:(?!\1).)*\1/, class: 'string' },
+                { pattern: /^\/\/.*$/, class: 'comment' },
+                { pattern: /^[0-9]+(?:\.[0-9]+)?/, class: 'number' },
+                { pattern: /^([\{\}\[\]\(\),.;])/, class: 'punctuation' },
+                { pattern: /^(=|\+|-|\*|\/|>|<|!|&|\|)/, class: 'operator' },
+                { pattern: /^[a-zA-Z_$][a-zA-Z0-9_$]*/, class: 'variable' }
+            ];
+
+            // Look at the current word
+            const beforeCursor = text.slice(0, pos);
+            const afterCursor = text.slice(pos);
+            const wordBefore = beforeCursor.match(/[a-zA-Z0-9_$]*$/)[0];
+            const wordAfter = afterCursor.match(/^[a-zA-Z0-9_$]*/)[0];
+            const currentWord = wordBefore + wordAfter;
+            const wordStart = pos - wordBefore.length;
+
+            // Only check for token type if we're at the start of a word
+            if (wordBefore.length === 0) {
+                for (const { pattern, class: className } of patterns) {
+                    if (pattern.test(currentWord)) {
+                        return className;
+                    }
+                }
+            }
+
+            // Return the existing class if we're in the middle of a word
+            const prevSpan = editor.lastChild?.previousSibling;
+            if (prevSpan && prevSpan.className && wordBefore.length > 0) {
+                return prevSpan.className;
+            }
+
+            return null;
+        }
+
+        function typeText(text) {
+            editor.innerHTML = '';
+            const cursor = createCursor();
+            editor.appendChild(cursor);
+            
+            let pos = 0;
+            
+            function type() {
+                if (pos < text.length) {
+                    const char = text[pos];
+                    if (char === '\n') {
+                        editor.insertBefore(document.createTextNode('\n'), cursor);
+                    } else {
+                        const span = document.createElement('span');
+                        const tokenClass = getTokenType(text, pos);
+                        if (tokenClass) {
+                            span.className = tokenClass;
+                        }
+                        span.textContent = char;
+                        editor.insertBefore(span, cursor);
+                    }
+                    
+                    pos++;
+                    autoScroll();
+                    setTimeout(type, typingSpeed);
+                }
+            }
+            type();
+        }
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = (e) => {
+                typeText(e.target.result);
+            };
+            
+            reader.readAsText(file);
+        });
+    </script>
+</body>
+</html>

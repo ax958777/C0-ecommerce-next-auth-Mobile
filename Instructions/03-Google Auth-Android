@@ -1,0 +1,117 @@
+Google OAuth2 with Kotlin: Android Credential Manager & Ktor
+
+https://medium.com/@teo.vladusic/google-oauth2-with-kotlin-android-credential-manager-ktor-8bfea37c5861
+
+I will demonstrate how you can implement Google authentication for your Android app. We will be using native Android sign-in using the Credential Manager and connecting to our secure backend. All with the power of Kotlin.
+
+Part 1: Setup
+Let’s start with the boring stuff: Google Developer Console.
+You will need a Google Developer Console account and create two OAuth 2.0 Client IDs. Yep you guessed it, one for the Android app and the other one for the backend.
+
+Once we get credentials we can start implementing authorization on the client side.
+
+Part 2: Android app
+Paste in dependencies:
+
+implementation("androidx.credentials:credentials:<latest version>")
+implementation("androidx.credentials:credentials-play-services-auth:<latest version>")
+implementation("com.google.android.libraries.identity.googleid:googleid:<latest version>")
+Let’s create a button and respond to a click:
+
+GoogleLoginButton(
+    onClick = {
+        val googleIdOption: GetGoogleIdOption = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(false) // Query all google accounts on the device
+            .setServerClientId(SERVER_CLIENT_ID)
+            .build()
+    
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(googleIdOption)
+            .build()
+    
+        val credentialManager = CredentialManager.create(context)
+    
+        coroutineScope.launch {
+            try {
+                val result = credentialManager.getCredential(context, request)
+                handleSignIn(result)
+            } catch (e: GetCredentialException) {
+                Log.e("MainActivity", "GetCredentialException", e)
+            }
+        }
+    }
+)
+Note: demonstration purposes only; You should not handle sign-in inside onClick lambda.
+
+We should already have a Google sign-in prompt opening 👏🏼.
+
+
+Now we just need to handle the result:
+
+private fun handleSignIn(result: GetCredentialResponse) {
+    // Handle the successfully returned credential.
+    when (val credential = result.credential) {
+        is CustomCredential -> {
+            if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                try {
+                    // Use googleIdTokenCredential and extract id to validate and
+                    // authenticate on your server.
+                    val googleIdTokenCredential =
+                        GoogleIdTokenCredential.createFrom(credential.data)
+
+                    // TODO: Send [googleIdTokenCredential.idToken] to your backend
+                } catch (e: GoogleIdTokenParsingException) {
+                    Log.e("MainActivity", "handleSignIn:", e)
+                }
+            } else {
+                // Catch any unrecognized custom credential type here.
+                Log.e("MainActivity", "Unexpected type of credential")
+            }
+        }
+
+        else -> {
+            // Catch any unrecognized credential type here.
+            Log.e("MainActivity", "Unexpected type of credential")
+        }
+    }
+}
+We are done with the Android part. If you are implementing this on the real app, consider adding some loading indicators, error handling, and thinking out proper architecture.
+
+Part 3: Backend implementation
+Let’s hop into IntelliJ, create a simple POST route to /google-auth and accept the idToken from Android.
+
+Before creating a route, quickly paste in the dependency.
+Important: you should regularly revisit and update this dependency to the newest version to avoid any vulnerabilities on the older versions!
+
+implementation("com.google.api-client:google-api-client:2.3.0")
+post("google-auth") {
+    // Receive a body with idToken
+    val body = call.receiveNullable<PostAuth>() ?: throw BadRequestException("Invalid body")
+
+    // Consider injecting these two
+    val transport = ApacheHttpTransport()
+    val factory = GsonFactory.getDefaultInstance()
+
+    val verifier = GoogleIdTokenVerifier.Builder(transport, factory)
+        .setAudience(listOf(Config.GOOGLE_CLIENT_ID)) // Server client id from google cloud console
+        .build()
+
+    // Verify received token
+    val idToken = verifier.verify(body.idToken) ?: throw BadRequestException("Invalid token")
+
+    val payload = idToken.payload
+
+    // Extract all properties you need to get/create a user
+    val email = payload.email
+    val name = payload["name"]?.toString() ?: email.substringBefore("@")
+    val pictureUrl = payload["picture"]?.toString()
+
+    val user = userApi.getUserByEmail(email) ?: registerUser(email, name, pictureUrl)
+
+    val tokens = tokenProvider.createTokens(user)
+
+    call.respond(tokens)
+}
+Aand we have come to an end :). Hope you like the article, I am considering any questions or improvements you might have. Happy Authenticating!
+
+#AndroidDev #GoogleSignIn #CredentialManager #AppDevelopment #AuthenticationTips
