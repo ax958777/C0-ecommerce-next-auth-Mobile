@@ -18,6 +18,8 @@ export async function POST(request: Request) {
       );
     }
 
+    console.log(request);
+
     const { email, password } = await request.json();
 
     if (!email || !password) {
